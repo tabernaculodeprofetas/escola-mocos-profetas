@@ -54,6 +54,7 @@
 
   // Elementos do Sorteador de Inscritos Confirmados
   const raffleBtn = document.getElementById("raffleBtn");
+  const raffleCardBtn = document.getElementById("raffleCardBtn");
   const raffleModal = document.getElementById("raffleModal");
   const closeRaffleModalBtn = document.getElementById("closeRaffleModalBtn");
   const closeEmptyRaffleBtn = document.getElementById("closeEmptyRaffleBtn");
@@ -1353,6 +1354,12 @@
   // Ouvintes de Eventos do Sorteador
   if (raffleBtn) {
     raffleBtn.addEventListener("click", () => {
+      openRaffleModal();
+    });
+  }
+
+  if (raffleCardBtn) {
+    raffleCardBtn.addEventListener("click", () => {
       openRaffleModal();
     });
   }

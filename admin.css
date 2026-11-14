@@ -520,6 +520,14 @@ h1, h2, h3 {
   color: var(--text-muted);
 }
 
+.metric-footer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 /* ==========================================================================
    BARRA DE FERRAMENTAS
    ========================================================================== */
