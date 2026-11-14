@@ -11,7 +11,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Montserrat:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 
-  <link rel="stylesheet" href="admin.css?v=3" />
+  <link rel="stylesheet" href="admin.css?v=4" />
 </head>
 <body>
   <!-- TELA DE LOGIN (Visível por padrão até autenticar) -->
@@ -218,6 +218,9 @@
         </div>
 
         <div class="toolbar-actions">
+          <button class="btn btn--raffle" id="raffleBtn" type="button" title="Realizar sorteio entre os inscritos com presença confirmada">
+            🎲 Sortear Inscrito
+          </button>
           <button class="btn btn--secondary" id="testWhatsappBtn" type="button" title="Testar notificação no seu WhatsApp">
             📲 Testar WhatsApp
           </button>
@@ -258,6 +261,120 @@
         </div>
       </section>
 
+      <!-- MODAL DO SORTEADOR DE INSCRITOS CONFIRMADOS -->
+      <div class="modal-overlay hidden" id="raffleModal" role="dialog" aria-modal="true" aria-labelledby="raffleModalTitle">
+        <div class="modal-card raffle-card">
+          <canvas id="raffleConfettiCanvas" class="confetti-canvas"></canvas>
+          <div class="modal-header">
+            <div class="modal-header-info">
+              <span class="eyebrow">SORTEIO OFICIAL DO EVENTO</span>
+              <h3 id="raffleModalTitle">Sorteador de <span>Inscritos</span></h3>
+              <p class="modal-subtitle">Contabiliza exclusivamente participantes com <strong>presença confirmada</strong>.</p>
+            </div>
+            <button type="button" class="modal-close-btn" id="closeRaffleModalBtn" aria-label="Fechar sorteador">✕</button>
+          </div>
+
+          <div class="raffle-body">
+            <!-- Barra de Informações do Pool de Sorteio -->
+            <div class="raffle-pool-bar">
+              <div class="raffle-pool-stat">
+                <span class="raffle-pool-icon">👥</span>
+                <span>Inscritos confirmados concorrendo:</span>
+                <strong id="raffleEligibleCount">0 confirmados</strong>
+              </div>
+              <label class="raffle-toggle-wrap" title="Evita que o mesmo inscrito seja sorteado duas vezes nesta sessão">
+                <input type="checkbox" id="raffleExcludePrevious" checked />
+                <span>Não repetir ganhadores</span>
+              </label>
+            </div>
+
+            <!-- Área de Apresentação / Sorteio -->
+            <div class="raffle-stage" id="raffleStage">
+              <!-- Estado Inicial (Idle) -->
+              <div class="raffle-state raffle-state--idle" id="raffleStateIdle">
+                <div class="raffle-dice-icon">🎲</div>
+                <h4>Pronto para o sorteio!</h4>
+                <p id="raffleIdleMessage">Clique no botão abaixo para sortear aleatoriamente um número entre os inscritos com presença confirmada.</p>
+                <button type="button" class="btn btn--primary btn--lg" id="startDrawBtn">
+                  🎰 REALIZAR SORTEIO
+                </button>
+              </div>
+
+              <!-- Estado Animando (Roleta / Sorteando) -->
+              <div class="raffle-state raffle-state--rolling hidden" id="raffleStateRolling">
+                <div class="raffle-roulette-box">
+                  <span class="roulette-eyebrow">SORTEANDO NÚMERO...</span>
+                  <div class="roulette-number" id="rouletteNumber">#---</div>
+                  <div class="roulette-name" id="rouletteName">Aguarde...</div>
+                </div>
+                <p class="roulette-hint">Girando entre os inscritos com presença confirmada...</p>
+              </div>
+
+              <!-- Estado Vencedor Revelado (Winner) -->
+              <div class="raffle-state raffle-state--winner hidden" id="raffleStateWinner">
+                <div class="winner-trophy">🏆 NÚMERO SORTEADO!</div>
+                
+                <div class="winner-card">
+                  <div class="winner-header">
+                    <span class="winner-badge-label">NÚMERO DE INSCRIÇÃO</span>
+                    <div class="winner-number" id="winnerNumber">#000</div>
+                  </div>
+
+                  <div class="winner-details">
+                    <h3 class="winner-name" id="winnerName">Nome do Ganhador</h3>
+                    <div class="winner-info-grid">
+                      <div class="winner-info-item">
+                        <span class="info-label">📱 Telefone:</span>
+                        <span class="info-value" id="winnerPhone">—</span>
+                      </div>
+                      <div class="winner-info-item">
+                        <span class="info-label">✉️ E-mail:</span>
+                        <span class="info-value" id="winnerEmail">—</span>
+                      </div>
+                      <div class="winner-info-item">
+                        <span class="info-label">⏱️ Entrada:</span>
+                        <span class="info-value" id="winnerCheckin">—</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="winner-actions">
+                  <button type="button" class="btn btn--primary" id="drawAgainBtn">
+                    🎲 Sortear outro
+                  </button>
+                  <button type="button" class="btn btn--secondary" id="copyWinnerBtn">
+                    📋 Copiar dados
+                  </button>
+                  <a href="#" class="btn btn--secondary" id="whatsappWinnerBtn" target="_blank" rel="noopener noreferrer">
+                    💬 Abrir WhatsApp
+                  </a>
+                </div>
+              </div>
+
+              <!-- Estado Sem Confirmados (Empty) -->
+              <div class="raffle-state raffle-state--empty hidden" id="raffleStateEmpty">
+                <div class="empty-icon">⚠️</div>
+                <h4>Nenhum Inscrito Confirmado</h4>
+                <p>Para realizar sorteios, é necessário que ao menos um participante tenha a <strong>presença confirmada</strong> na lista (clique no botão <em>"Confirmar presença"</em> na coluna de Presença).</p>
+                <button type="button" class="btn btn--secondary" id="closeEmptyRaffleBtn">
+                  Entendido, fechar
+                </button>
+              </div>
+            </div>
+
+            <!-- Histórico de Ganhadores da Sessão -->
+            <div class="raffle-history hidden" id="raffleHistory">
+              <div class="raffle-history-header">
+                <span>📜 Histórico desta sessão (<span id="raffleHistoryCount">0</span> sorteado(s))</span>
+                <button type="button" class="btn-history-clear" id="clearRaffleHistoryBtn" title="Limpar histórico desta sessão">Limpar histórico</button>
+              </div>
+              <ul class="raffle-history-list" id="raffleHistoryList"></ul>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- CONTAINER PARA NOTIFICAÇÕES TOAST RÁPIDAS (CHECK-IN) -->
       <div class="toast-container" id="toastContainer" aria-live="polite"></div>
     </main>
@@ -274,6 +391,6 @@
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
   <script src="config.js?v=2"></script>
-  <script src="admin.js?v=8"></script>
+  <script src="admin.js?v=9"></script>
 </body>
 </html>

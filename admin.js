@@ -52,10 +52,43 @@
   const registrationsTbody = document.getElementById("registrationsTbody");
   const toastContainer = document.getElementById("toastContainer");
 
+  // Elementos do Sorteador de Inscritos Confirmados
+  const raffleBtn = document.getElementById("raffleBtn");
+  const raffleModal = document.getElementById("raffleModal");
+  const closeRaffleModalBtn = document.getElementById("closeRaffleModalBtn");
+  const closeEmptyRaffleBtn = document.getElementById("closeEmptyRaffleBtn");
+  const raffleEligibleCount = document.getElementById("raffleEligibleCount");
+  const raffleExcludePrevious = document.getElementById("raffleExcludePrevious");
+  const raffleStateIdle = document.getElementById("raffleStateIdle");
+  const raffleStateRolling = document.getElementById("raffleStateRolling");
+  const raffleStateWinner = document.getElementById("raffleStateWinner");
+  const raffleStateEmpty = document.getElementById("raffleStateEmpty");
+  const startDrawBtn = document.getElementById("startDrawBtn");
+  const drawAgainBtn = document.getElementById("drawAgainBtn");
+  const copyWinnerBtn = document.getElementById("copyWinnerBtn");
+  const whatsappWinnerBtn = document.getElementById("whatsappWinnerBtn");
+  const rouletteNumber = document.getElementById("rouletteNumber");
+  const rouletteName = document.getElementById("rouletteName");
+  const winnerNumber = document.getElementById("winnerNumber");
+  const winnerName = document.getElementById("winnerName");
+  const winnerPhone = document.getElementById("winnerPhone");
+  const winnerEmail = document.getElementById("winnerEmail");
+  const winnerCheckin = document.getElementById("winnerCheckin");
+  const raffleHistory = document.getElementById("raffleHistory");
+  const raffleHistoryList = document.getElementById("raffleHistoryList");
+  const raffleHistoryCount = document.getElementById("raffleHistoryCount");
+  const clearRaffleHistoryBtn = document.getElementById("clearRaffleHistoryBtn");
+
   // Estado da aplicação
   let allRegistrations = [];
   let isRecoveringPassword = false;
   let currentFilter = "all"; // "all" | "present" | "pending"
+
+  // Estado do sorteador (sessão ativa)
+  const drawnWinnerIds = new Set();
+  let sessionWinnersHistory = [];
+  let currentWinner = null;
+  let rouletteInterval = null;
 
   // Detectar se a URL contém tokens REAIS de recuperação vindo do e-mail do Supabase
   if ((window.location.hash.includes("type=recovery") && window.location.hash.includes("access_token")) ||
@@ -361,6 +394,9 @@
     }).length;
 
     statToday.textContent = todayCount.toString();
+    if (typeof updateRaffleEligibleUI === "function") {
+      updateRaffleEligibleUI();
+    }
   }
 
   // Formatação do número de inscrição com no mínimo 3 dígitos
@@ -1047,6 +1083,362 @@
 </body>
 </html>`);
     printWindow.document.close();
+  }
+
+  // ============================================================================
+  // SORTEADOR DE NÚMERO DE INSCRITOS (EXCLUSIVO PARA PRESENÇAS CONFIRMADAS)
+  // ============================================================================
+
+  // Retorna estritamente apenas os inscritos cuja presença foi confirmada (attended === true)
+  function getConfirmedRegistrations() {
+    return allRegistrations.filter((item) => Boolean(item.attended));
+  }
+
+  // Retorna os inscritos confirmados aptos a serem sorteados (considerando a regra de não repetição)
+  function getEligibleRafflePool() {
+    const confirmed = getConfirmedRegistrations();
+    const excludePrev = raffleExcludePrevious && raffleExcludePrevious.checked;
+    if (excludePrev) {
+      return confirmed.filter((item) => !drawnWinnerIds.has(item.id));
+    }
+    return confirmed;
+  }
+
+  // Atualiza contadores e estado da barra de participantes do sorteio
+  function updateRaffleEligibleUI() {
+    const confirmed = getConfirmedRegistrations();
+    const eligible = getEligibleRafflePool();
+    if (!raffleEligibleCount) return;
+
+    if (confirmed.length === 0) {
+      raffleEligibleCount.textContent = "0 confirmados";
+      raffleEligibleCount.style.color = "var(--danger)";
+    } else if (raffleExcludePrevious && raffleExcludePrevious.checked && drawnWinnerIds.size > 0) {
+      raffleEligibleCount.textContent = `${eligible.length} de ${confirmed.length} confirmados`;
+      raffleEligibleCount.style.color = eligible.length > 0 ? "var(--success)" : "var(--danger)";
+    } else {
+      raffleEligibleCount.textContent = `${confirmed.length} confirmado${confirmed.length === 1 ? '' : 's'}`;
+      raffleEligibleCount.style.color = "var(--success)";
+    }
+  }
+
+  // Alterna entre as telas internas do sorteador: 'idle' | 'rolling' | 'winner' | 'empty'
+  function showRaffleState(state) {
+    if (raffleStateIdle) raffleStateIdle.classList.add("hidden");
+    if (raffleStateRolling) raffleStateRolling.classList.add("hidden");
+    if (raffleStateWinner) raffleStateWinner.classList.add("hidden");
+    if (raffleStateEmpty) raffleStateEmpty.classList.add("hidden");
+
+    if (state === "idle" && raffleStateIdle) raffleStateIdle.classList.remove("hidden");
+    if (state === "rolling" && raffleStateRolling) raffleStateRolling.classList.remove("hidden");
+    if (state === "winner" && raffleStateWinner) raffleStateWinner.classList.remove("hidden");
+    if (state === "empty" && raffleStateEmpty) raffleStateEmpty.classList.remove("hidden");
+  }
+
+  // Abertura do modal do sorteador
+  function openRaffleModal() {
+    if (!raffleModal) return;
+    updateRaffleEligibleUI();
+    const confirmed = getConfirmedRegistrations();
+
+    if (confirmed.length === 0) {
+      showRaffleState("empty");
+    } else if (!currentWinner) {
+      showRaffleState("idle");
+    } else {
+      showRaffleState("winner");
+    }
+
+    raffleModal.classList.remove("hidden");
+    document.body.style.overflow = "hidden";
+  }
+
+  // Fechamento do modal do sorteador
+  function closeRaffleModal() {
+    if (!raffleModal) return;
+    if (rouletteInterval) {
+      clearInterval(rouletteInterval);
+      rouletteInterval = null;
+    }
+    raffleModal.classList.add("hidden");
+    document.body.style.overflow = "";
+  }
+
+  // Execução do sorteio com efeito de roleta
+  function executeRaffleDraw() {
+    const confirmed = getConfirmedRegistrations();
+
+    if (confirmed.length === 0) {
+      showRaffleState("empty");
+      updateRaffleEligibleUI();
+      return;
+    }
+
+    const pool = getEligibleRafflePool();
+
+    if (pool.length === 0) {
+      alert(
+        `Todos os ${confirmed.length} participantes com presença confirmada já foram sorteados nesta sessão!\n\n` +
+        `Para sortear novamente entre todos eles, desmarque a opção 'Não repetir ganhadores' ou clique em 'Limpar histórico'.`
+      );
+      return;
+    }
+
+    showRaffleState("rolling");
+
+    // Sorteia aleatoriamente um inscrito entre os confirmados aptos
+    const winnerIndex = Math.floor(Math.random() * pool.length);
+    const chosenWinner = pool[winnerIndex];
+
+    let rollCount = 0;
+    const maxRolls = 24;
+    const intervalTime = 75;
+
+    if (rouletteInterval) clearInterval(rouletteInterval);
+
+    rouletteInterval = setInterval(() => {
+      rollCount++;
+      const randomItem = pool[Math.floor(Math.random() * pool.length)];
+      if (rouletteNumber) {
+        rouletteNumber.textContent = `#${formatRegNumber(randomItem.registration_number)}`;
+      }
+      if (rouletteName) {
+        rouletteName.textContent = randomItem.full_name || "—";
+      }
+
+      if (rollCount >= maxRolls) {
+        clearInterval(rouletteInterval);
+        rouletteInterval = null;
+        revealRaffleWinner(chosenWinner);
+      }
+    }, intervalTime);
+  }
+
+  // Revela o vencedor sorteado com comemoração e confetes
+  function revealRaffleWinner(winner) {
+    currentWinner = winner;
+    drawnWinnerIds.add(winner.id);
+    sessionWinnersHistory.unshift({
+      winner: winner,
+      timestamp: new Date()
+    });
+
+    const regNumPadded = formatRegNumber(winner.registration_number);
+    if (winnerNumber) winnerNumber.textContent = `#${regNumPadded}`;
+    if (winnerName) winnerName.textContent = winner.full_name || "—";
+
+    const phoneInfo = formatPhone(winner.phone);
+    if (winnerPhone) winnerPhone.textContent = phoneInfo.display;
+    if (winnerEmail) winnerEmail.textContent = (winner.email || "—").toLowerCase();
+
+    const checkinTime = winner.attended_at ? formatTimeOnly(winner.attended_at) : "";
+    if (winnerCheckin) {
+      winnerCheckin.textContent = checkinTime ? `Confirmada às ${checkinTime}` : "Presença Confirmada ✅";
+    }
+
+    if (whatsappWinnerBtn) {
+      const digits = (winner.phone || "").replace(/\D/g, "");
+      if (digits.length >= 10) {
+        const msg = encodeURIComponent(
+          `Olá, ${winner.full_name}! 🎉\n\nParabéns! Seu número de inscrição (#${regNumPadded}) acaba de ser sorteado no evento da Escola de Moços e Profetas - MLK College Formation! 🏆✨`
+        );
+        whatsappWinnerBtn.href = `https://wa.me/55${digits}?text=${msg}`;
+        whatsappWinnerBtn.classList.remove("hidden");
+      } else {
+        whatsappWinnerBtn.classList.add("hidden");
+      }
+    }
+
+    updateRaffleEligibleUI();
+    updateRaffleHistoryUI();
+    showRaffleState("winner");
+    launchRaffleConfetti();
+  }
+
+  // Atualiza o histórico visual de ganhadores da sessão
+  function updateRaffleHistoryUI() {
+    if (!raffleHistory || !raffleHistoryList || !raffleHistoryCount) return;
+
+    if (sessionWinnersHistory.length === 0) {
+      raffleHistory.classList.add("hidden");
+      raffleHistoryList.innerHTML = "";
+      raffleHistoryCount.textContent = "0";
+      return;
+    }
+
+    raffleHistory.classList.remove("hidden");
+    raffleHistoryCount.textContent = sessionWinnersHistory.length.toString();
+
+    raffleHistoryList.innerHTML = sessionWinnersHistory.map((item) => {
+      const w = item.winner;
+      const num = formatRegNumber(w.registration_number);
+      const time = formatTimeOnly(item.timestamp.toISOString());
+      return `
+        <li class="raffle-history-item">
+          <div>
+            <strong>#${num}</strong> — ${escapeHtml(w.full_name || "—")}
+          </div>
+          <span style="font-size:0.74rem; color:var(--text-muted);">${time}</span>
+        </li>
+      `;
+    }).join("");
+  }
+
+  // Efeito de confetes festivos nativo no Canvas
+  function launchRaffleConfetti() {
+    const canvas = document.getElementById("raffleConfettiCanvas");
+    if (!canvas) return;
+    const parent = canvas.parentElement;
+    if (!parent) return;
+
+    canvas.width = parent.offsetWidth;
+    canvas.height = parent.offsetHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const colors = ["#C9A24D", "#F7DF94", "#E4C36A", "#3ecf8e", "#ffffff", "#38bdf8", "#fbbf24"];
+    const pieces = [];
+    const count = 75;
+
+    for (let i = 0; i < count; i++) {
+      pieces.push({
+        x: canvas.width / 2 + (Math.random() - 0.5) * 80,
+        y: canvas.height * 0.45,
+        w: Math.random() * 9 + 4,
+        h: Math.random() * 7 + 4,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        vx: (Math.random() - 0.5) * 14,
+        vy: (Math.random() - 1.3) * 12,
+        gravity: 0.28,
+        rotation: Math.random() * 360,
+        rotationSpeed: (Math.random() - 0.5) * 12
+      });
+    }
+
+    const start = Date.now();
+    let animId;
+
+    function render() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      let alive = false;
+
+      for (let p of pieces) {
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += p.gravity;
+        p.rotation += p.rotationSpeed;
+
+        if (p.y < canvas.height + 20) {
+          alive = true;
+          ctx.save();
+          ctx.translate(p.x, p.y);
+          ctx.rotate((p.rotation * Math.PI) / 180);
+          ctx.fillStyle = p.color;
+          ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+          ctx.restore();
+        }
+      }
+
+      if (alive && Date.now() - start < 3500) {
+        animId = requestAnimationFrame(render);
+      } else {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        cancelAnimationFrame(animId);
+      }
+    }
+
+    render();
+  }
+
+  // Ouvintes de Eventos do Sorteador
+  if (raffleBtn) {
+    raffleBtn.addEventListener("click", () => {
+      openRaffleModal();
+    });
+  }
+
+  if (closeRaffleModalBtn) {
+    closeRaffleModalBtn.addEventListener("click", () => {
+      closeRaffleModal();
+    });
+  }
+
+  if (closeEmptyRaffleBtn) {
+    closeEmptyRaffleBtn.addEventListener("click", () => {
+      closeRaffleModal();
+    });
+  }
+
+  if (raffleModal) {
+    raffleModal.addEventListener("click", (e) => {
+      if (e.target === raffleModal) {
+        closeRaffleModal();
+      }
+    });
+  }
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && raffleModal && !raffleModal.classList.contains("hidden")) {
+      closeRaffleModal();
+    }
+  });
+
+  if (startDrawBtn) {
+    startDrawBtn.addEventListener("click", () => {
+      executeRaffleDraw();
+    });
+  }
+
+  if (drawAgainBtn) {
+    drawAgainBtn.addEventListener("click", () => {
+      executeRaffleDraw();
+    });
+  }
+
+  if (raffleExcludePrevious) {
+    raffleExcludePrevious.addEventListener("change", () => {
+      updateRaffleEligibleUI();
+    });
+  }
+
+  if (clearRaffleHistoryBtn) {
+    clearRaffleHistoryBtn.addEventListener("click", () => {
+      if (confirm("Deseja limpar o histórico de ganhadores desta sessão?")) {
+        drawnWinnerIds.clear();
+        sessionWinnersHistory = [];
+        updateRaffleHistoryUI();
+        updateRaffleEligibleUI();
+      }
+    });
+  }
+
+  if (copyWinnerBtn) {
+    copyWinnerBtn.addEventListener("click", () => {
+      if (!currentWinner) return;
+      const regNumPadded = formatRegNumber(currentWinner.registration_number);
+      const text = [
+        `🎉 GANHADOR DO SORTEIO — ESCOLA DE MOÇOS E PROFETAS`,
+        `🏆 Número de Inscrição: #${regNumPadded}`,
+        `👤 Nome Completo: ${currentWinner.full_name || "—"}`,
+        `📱 Telefone: ${currentWinner.phone || "—"}`,
+        `✉️ E-mail: ${currentWinner.email || "—"}`,
+        `✅ Presença: ${currentWinner.attended_at ? `Confirmada às ${formatTimeOnly(currentWinner.attended_at)}` : "Confirmada"}`
+      ].join("\n");
+
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(() => {
+          const original = copyWinnerBtn.textContent;
+          copyWinnerBtn.textContent = "✅ Dados Copiados!";
+          setTimeout(() => {
+            copyWinnerBtn.textContent = original;
+          }, 2000);
+        }).catch(() => {
+          prompt("Copie os dados do ganhador:", text);
+        });
+      } else {
+        prompt("Copie os dados do ganhador:", text);
+      }
+    });
   }
 
   // Alternar visibilidade de senha (mostrar/ocultar)
